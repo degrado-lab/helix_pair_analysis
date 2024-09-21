@@ -160,41 +160,24 @@ def main(args):
     eff_coords_1 = np.array(eff_coords_1).T
     eff_coords_2 = np.array(eff_coords_2).T
 
-    '''
-    dist_diff = eff_coords_1[0] - eff_coords_2[0]
-    angle_diff = eff_coords_1[1] - eff_coords_2[1]
-    piston_diff = eff_coords_1[2] - eff_coords_2[2]
-    gearbox1_diff = 2.3 * wrapped_diff(eff_coords_1[3], eff_coords_2[3])
-    gearbox2_diff = 2.3 * wrapped_diff(eff_coords_1[4], eff_coords_2[4])
-
-    plt.figure()
-    plt.plot(resnums, dist_diff, label='Distance difference (Angstroms)')
-    plt.plot(resnums, angle_diff, label='Scissor difference (Angstroms)')
-    plt.plot(resnums, piston_diff, label='Piston difference (Angstroms)')
-    plt.plot(resnums, gearbox1_diff, label='Gearbox 1 difference (Angstroms)')
-    plt.plot(resnums, gearbox2_diff, label='Gearbox 2 difference (Angstroms)')
-    plt.legend(fontsize='large')
-    plt.xlabel('Residue window', fontsize='x-large')
-    plt.ylabel('Coordinate difference', fontsize='x-large')
-    plt.xticks(resnums, fontsize='large')
-    plt.yticks(fontsize='large')
-    plt.show()
-    '''
-    plt.figure()
-    labels = ['Distance difference (Angstroms)', 
-              'Cylindrical angle difference (Radians)',
-              'Axial difference (Angstroms)',
-              'Phi difference (Radians)',
-              'Theta difference (Radians)',
-              'Psi difference (Radians)']
-    for i in range(6):
-        plt.plot(resnums, eff_coords_1[i], label=labels[i])
-    plt.legend(fontsize='large')
-    plt.xlabel('Residue window', fontsize='x-large')
-    plt.ylabel('Coordinate difference', fontsize='x-large')
-    plt.xticks(resnums, fontsize='large')
-    plt.yticks(fontsize='large')
-    plt.show()
+    for i, eff_coords in enumerate([eff_coords_1, eff_coords_2]):
+        plt.figure()
+        labels = ['Distance difference (Angstroms)', 
+                  'Cylindrical angle difference (Radians)',
+                  'Axial difference (Angstroms)',
+                  'Phi difference (Radians)',
+                  'Theta difference (Radians)',
+                  'Psi difference (Radians)']
+        for j in range(6):
+            plt.plot(resnums, eff_coords[j], label=labels[j])
+        plt.title('Effective coordinates for helix {}'.format(i + 1),
+                  fontsize='x-large')
+        plt.legend(fontsize='large')
+        plt.xlabel('Residue window', fontsize='x-large')
+        plt.ylabel('Coordinate difference', fontsize='x-large')
+        plt.xticks(resnums, fontsize='large')
+        plt.yticks(fontsize='large')
+        plt.show()
 
 
 if __name__ == "__main__":
