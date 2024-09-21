@@ -4,8 +4,10 @@ import argparse
 import numpy as np
 import prody as pr
 
+from itertools import permutations
 from matplotlib import pyplot as plt
 from scipy.spatial.distance import cdist
+from scipy.spatial.transform import Rotation
 
 from utils import *
 
@@ -51,11 +53,26 @@ def main(args):
     struct2 = pr.parsePDB(args.pdb2)
     helix2_1 = struct2.select(args.selstr21 + CA_sel).getCoords()
     helix2_2 = struct2.select(args.selstr22 + CA_sel).getCoords()
-    resnums = struct1.select(args.selstr11 + CA_sel).getResnums()
-    resnums = resnums[args.window // 2:-args.window // 2 + 1]
-
     assert len(helix1_1) == len(helix1_2) == len(helix2_1) == len(helix2_2), \
         'Helices must have the same number of residues.'
+    # ensure helix1_1 and helix1_2 are symmetry mates about the z-axis
+    R, t, ssd = kabsch(helix1_2, helix1_1)
+    if np.sqrt(ssd / helix1_1.shape[0]) > 0.1:
+        print('Warning: helices from the first PDB are not symmetry mates.')
+    eigvals, dR = np.linalg.eigh(R)
+    for p in permutations(range(3)):
+        idxs = np.array(p)
+        if np.allclose(eigvals[idxs], np.array([-1, -1, 1])) and \
+                np.linalg.det(dR[:, idxs]) > 0:
+            dR = dR[:, idxs]
+            break
+    dt = -0.5 * t @ dR
+    helix1_1 = helix1_1 @ dR + dt
+    helix1_2 = helix1_2 @ dR + dt
+    helix2_1 = helix2_1 @ dR + dt
+    helix2_2 = helix2_2 @ dR + dt
+    resnums = struct1.select(args.selstr11 + CA_sel).getResnums()
+    resnums = resnums[args.window // 2:-args.window // 2 + 1]
 
     eff_coords_1 = []
     eff_coords_2 = []
@@ -72,74 +89,83 @@ def main(args):
         dists_2 = cdist(helix2_1_window, helix2_2_window)
         idx21, idx22 = np.unravel_index(np.argmin(dists_2), dists_2.shape)
 
-        idx11, idx12, idx21, idx22 = args.window // 2, \
-                                     args.window // 2, \
-                                     args.window // 2, \
-                                     args.window // 2
-        helix_half_length = 1.5 * args.window // 2
-
         # find rotation and translation matrices for each window
-        R11, t11, sse11, _ = kabsch(ideal_helix(args.window, start=-idx11),
-                                    helix1_1_window)
-        ideal_11 = ideal_helix(args.window, start=-idx11) @ R11 + t11
-        R12, t12, sse12, _ = kabsch(ideal_helix(args.window, start=-idx12),
-                                    helix1_2_window)
-        ideal_12 = ideal_helix(args.window, start=-idx12) @ R12 + t12
-        R21, t21, sse21, _ = kabsch(ideal_helix(args.window, start=-idx21),
-                                    helix2_1_window)
-        ideal_21 = ideal_helix(args.window, start=-idx21) @ R21 + t21
-        R22, t22, sse22, _ = kabsch(ideal_helix(args.window, start=-idx22),
-                                    helix2_2_window)
-        ideal_22 = ideal_helix(args.window, start=-idx22) @ R22 + t22
+        ideal = ideal_helix(args.window, start=-args.window // 2)
+        ideal -= ideal.mean(axis=0)
+        R11, t11, sse11 = kabsch(ideal, helix1_1_window)
+        R12, t12, sse12 = kabsch(ideal, helix1_2_window)
+        R21, t21, sse21 = kabsch(ideal, helix2_1_window)
+        R22, t22, sse22 = kabsch(ideal, helix2_2_window)
 
-        '''
-        print(np.sqrt(sse11 / args.window),
-              np.sqrt(sse12 / args.window),
-              np.sqrt(sse21 / args.window),
-              np.sqrt(sse22 / args.window))
-        '''
+        # adjust coordinate system so t12 - t11 = [|t12 - t11|, 0, 0]
+        dt = t12 - t11
+        cos_theta = dt[0] / np.linalg.norm(dt)
+        sin_theta = dt[1] / np.linalg.norm(dt)
+        dR = np.array([[cos_theta, -sin_theta, 0],
+                       [sin_theta, cos_theta, 0],
+                       [0, 0, 1]])
+        R11 = R11 @ dR
+        R12 = R12 @ dR
+        R21 = R21 @ dR
+        R22 = R22 @ dR
+        t11 = t11 @ dR
+        t12 = t12 @ dR
+        t21 = t21 @ dR
+        t22 = t22 @ dR
 
-        # find relative transforms between the two helices
-        # R1 = R11.T @ R12
-        # t1 = t12 - t11 @ R1
-        # R2 = R21.T @ R22
-        # t2 = t22 - t21 @ R2
+        # convert the translation vectors to cylindical coordinates
+        r11, alpha11, z11 = cylindrical(t11)
+        r12, alpha12, z12 = cylindrical(t12)
+        r21, alpha21, z21 = cylindrical(t21)
+        r22, alpha22, z22 = cylindrical(t22)
 
-        '''
-        sanity_check_3d_plot(struct1.select('name CA').getCoords(),
-                             ideal_11,
-                             ideal_12,
-                             R11, t11,
-                             R12, t12,
-                             R1, t1)
-        sanity_check_3d_plot(struct2.select('name CA').getCoords(),
-                             ideal_21,
-                             ideal_22,
-                             R21, t21,
-                             R22, t22,
-                             R2, t2)
-        '''
+        # compute relative cylindrical coordinates
+        d_r_1 = r21 - r11
+        d_alpha_1 = wrapped_diff(alpha21, alpha11)[0]
+        d_z_1 = z21 - z11
+
+        d_r_2 = r22 - r12
+        d_alpha_2 = wrapped_diff(alpha22, alpha12)[0]
+        d_z_2 = z22 - z12
+
+        # compute Euler angles for each rotation matrix
+        phi11, theta11, psi11 = euler(R11)
+        phi12, theta12, psi12 = euler(R12)
+        phi21, theta21, psi21 = euler(R21)
+        phi22, theta22, psi22 = euler(R22)
+
+        # compute relative Euler angles
+        d_phi_1 = wrapped_diff(phi21, phi11)[0]
+        d_theta_1 = theta21 - theta11
+        d_psi_1 = wrapped_diff(psi21, psi11)[0]
+        d_phi_2 = wrapped_diff(phi22, phi12)[0]
+        d_theta_2 = theta22 - theta12
+        d_psi_2 = wrapped_diff(psi22, psi12)[0]
+        # d_phi_1, d_theta_1, d_psi_1 = euler(R21 @ R11.T)
+        # d_phi_2, d_theta_2, d_psi_2 = euler(R22 @ R12.T)
+
+        # append the relative coordinates to the list
+        eff_coords_1.append([d_r_1, d_alpha_1, d_z_1, 
+                             d_phi_1, d_theta_1, d_psi_1])
+        eff_coords_2.append([d_r_2, d_alpha_2, d_z_2, 
+                             d_phi_2, d_theta_2, d_psi_2])
 
         # calculate the effective coordinates for each transform
-        eff_coords_1.append(effective_coords(R11, t11, R12, t12,
-                                             helix_half_length))
-        eff_coords_2.append(effective_coords(R21, t21, R22, t22,
-                                             helix_half_length))
+        # helix_half_length = 1.5 * args.window // 2
+        # eff_coords_1.append(effective_coords(R11, t11, R12, t12,
+        #                                      helix_half_length))
+        # eff_coords_2.append(effective_coords(R21, t21, R22, t22,
+        #                                      helix_half_length))
 
     eff_coords_1 = np.array(eff_coords_1).T
     eff_coords_2 = np.array(eff_coords_2).T
 
-    # dist_diff, angle_diff, piston1_diff, piston2_diff, \
-    #     gearbox1_diff, gearbox2_diff = eff_coords_2
-    # dist_diff, angle_diff, piston1_diff, piston2_diff, \
-    #     gearbox1_diff, gearbox2_diff = eff_coords_1
-    # '''
+    '''
     dist_diff = eff_coords_1[0] - eff_coords_2[0]
     angle_diff = eff_coords_1[1] - eff_coords_2[1]
     piston_diff = eff_coords_1[2] - eff_coords_2[2]
     gearbox1_diff = 2.3 * wrapped_diff(eff_coords_1[3], eff_coords_2[3])
     gearbox2_diff = 2.3 * wrapped_diff(eff_coords_1[4], eff_coords_2[4])
-    # '''
 
     plt.figure()
     plt.plot(resnums, dist_diff, label='Distance difference (Angstroms)')
@@ -147,6 +173,22 @@ def main(args):
     plt.plot(resnums, piston_diff, label='Piston difference (Angstroms)')
     plt.plot(resnums, gearbox1_diff, label='Gearbox 1 difference (Angstroms)')
     plt.plot(resnums, gearbox2_diff, label='Gearbox 2 difference (Angstroms)')
+    plt.legend(fontsize='large')
+    plt.xlabel('Residue window', fontsize='x-large')
+    plt.ylabel('Coordinate difference', fontsize='x-large')
+    plt.xticks(resnums, fontsize='large')
+    plt.yticks(fontsize='large')
+    plt.show()
+    '''
+    plt.figure()
+    labels = ['Distance difference (Angstroms)', 
+              'Cylindrical angle difference (Radians)',
+              'Axial difference (Angstroms)',
+              'Phi difference (Radians)',
+              'Theta difference (Radians)',
+              'Psi difference (Radians)']
+    for i in range(6):
+        plt.plot(resnums, eff_coords_1[i], label=labels[i])
     plt.legend(fontsize='large')
     plt.xlabel('Residue window', fontsize='x-large')
     plt.ylabel('Coordinate difference', fontsize='x-large')

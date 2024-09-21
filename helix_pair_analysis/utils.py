@@ -1,5 +1,4 @@
 import numpy as np
-import numba as nb
 from matplotlib import pyplot as plt
 
 from scipy.optimize import minimize
@@ -278,6 +277,52 @@ def effective_coords_old(R, t):
     return dist, angle, piston1, piston2, gearbox1, gearbox2
 
 
+def cylindrical(t):
+    """Determine the cylindrical coordinates from a translation vector.
+
+    Parameters
+    ----------
+    t : np.ndarray [3]
+        Translation vector.
+
+    Returns
+    -------
+    r : float
+        Radial coordinate.
+    alpha : float
+        Angular coordinate.
+    z : float
+        Axial coordinate.
+    """
+    r = np.linalg.norm(t[:2])
+    alpha = np.arctan2(t[1], t[0])
+    z = t[2]
+    return r, alpha, z
+
+
+def euler(R):
+    """Determine the extrinsic xzx Euler angles from a rotation matrix.
+    
+    Parameters
+    ----------
+    R : np.ndarray [3 x 3]
+        Rotation matrix.
+
+    Returns
+    -------
+    phi : float
+        First Euler angle.
+    theta : float
+        Second Euler angle.
+    psi : float
+        Third Euler angle.
+    """
+    phi = np.arctan2(R[2, 0], R[2, 1])
+    theta = np.arccos(R[2, 2])
+    psi = -np.arctan2(R[0, 2], R[1, 2])
+    return phi, theta, psi
+
+
 def wrapped_diff(a, b, wrap=np.pi):
     """Calculate the wrapped difference between two angles.
 
@@ -375,54 +420,4 @@ def kabsch(X, Y):
     # compute SSD from aligned coordinates XR
     XRmY = np.dot(Xc, R) - Yc
     ssd = np.sum(XRmY ** 2)
-    # compute derivative of R with respect to Y
-    omega_U, omega_Vt = populate_omegas(U, S, Vt)
-    dUdH = np.einsum('km,ijml->ijkl', U, omega_U)
-    dVtdH = -np.einsum('ijkm,ml->ijkl', omega_Vt, Vt)
-    dRdH = np.einsum('imkl,mj->ijkl', dUdH, np.dot(D, Vt)) + \
-           np.einsum('im,mjkl->ijkl', np.dot(U, D), dVtdH)
-    dRdY = np.einsum('km,ijml->ijkl', Xc, dRdH)
-    XdRdY = np.einsum('im,mjkl->ijkl', Xc, dRdY)
-    d_ssd_dY = 2. * (np.sum(XRmY * XdRdY, axis=(0, 1)) - XRmY)
-    return R, t, ssd, d_ssd_dY
-
-
-@nb.jit(nopython=True, cache=True)
-def populate_omegas(U, S, Vt):
-    """Populate omega_U and omega_Vt matrices from U, S, and Vt.
-
-    Parameters
-    ----------
-    U : np.array [3 x 3]
-        Left unitary matrix from a singular value decomposition.
-    S : np.array [3]
-        Vector of singular values from a singular value decomposition.
-    Vt : np.array [3 x 3]
-        Right unitary matrix from a singular value decomposition.
-
-    Returns
-    -------
-    omega_U : np.array [3 x 3 x 3 x 3]
-        omega_U matrix of matrices as described in Papadopolou and
-        Lourakis (2000).
-    omega_Vt : np.array [3 x 3 x 3 x 3]
-        omega_V matrix of matrices as described in Papadopolou and
-        Lourakis (2000), but with the last two dimensions transposed.
-    """
-    omega_U = np.zeros((3, 3, 3, 3))
-    omega_Vt = np.zeros((3, 3, 3, 3))
-    for i in range(3):
-        for j in range(3):
-            for k, l in [(0, 1), (1, 2), (2, 0)]:
-                system_A = np.array([[S[l], S[k]],
-                                     [S[k], S[l]]])
-                system_b = np.array([[U[i, k] * Vt[l, j]],
-                                     [-U[i, l] * Vt[k, j]]])
-                if S[k] != S[l]:
-                    soln = np.linalg.solve(system_A, system_b)
-                else: # solve via least squares in the degenerate case
-                    soln, _, _, _ = np.linalg.lstsq(system_A, system_b, 1e-14)
-                omega_U[i, j, k, l], omega_Vt[i, j, l, k] = soln.flatten()
-                omega_U[i, j, l, k] = -omega_U[i, j, k, l]
-                omega_Vt[i, j, k, l] = -omega_Vt[i, j, l, k]
-    return omega_U, omega_Vt
+    return R, t, ssd
