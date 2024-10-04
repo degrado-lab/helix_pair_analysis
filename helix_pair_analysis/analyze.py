@@ -137,8 +137,9 @@ def main(args):
     dist_diff = eff_coords_1[0] - eff_coords_2[0]
     angle_diff = eff_coords_1[1] - eff_coords_2[1]
     piston_diff = eff_coords_1[2] - eff_coords_2[2]
-    gearbox1_diff = 2.3 * wrapped_diff(eff_coords_1[3], eff_coords_2[3])
-    gearbox2_diff = 2.3 * wrapped_diff(eff_coords_1[4], eff_coords_2[4])
+    # 3.35 = distance (in Angstroms) of CB from helix axis
+    gearbox1_diff = 3.35 * wrapped_diff(eff_coords_1[3], eff_coords_2[3])
+    gearbox2_diff = 3.35 * wrapped_diff(eff_coords_1[4], eff_coords_2[4])
     # '''
 
     plt.figure()
